@@ -1,0 +1,74 @@
+{
+  "name": "nestjs-tenant-guard",
+  "version": "0.1.0",
+  "description": "Central, fail-loud tenant isolation for NestJS + TypeORM apps that share one database.",
+  "keywords": [
+    "nestjs",
+    "typeorm",
+    "multi-tenant",
+    "multitenancy",
+    "tenant",
+    "isolation",
+    "async-local-storage"
+  ],
+  "license": "MIT",
+  "author": "Mohamad Moaaz Allow",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MohamadMoaazAllow/nestjs-tenant-guard"
+  },
+  "bugs": "https://github.com/MohamadMoaazAllow/nestjs-tenant-guard/issues",
+  "homepage": "https://github.com/MohamadMoaazAllow/nestjs-tenant-guard#readme",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "prebuild": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true })\"",
+    "build": "tsc -p tsconfig.build.json",
+    "test": "jest",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "typecheck": "tsc --noEmit",
+    "example": "ts-node -r tsconfig-paths/register --project example/tsconfig.json example/src/main.ts",
+    "prepublishOnly": "npm run lint && npm test && npm run build"
+  },
+  "peerDependencies": {
+    "@nestjs/common": "^11.0.0",
+    "@nestjs/core": "^11.0.0",
+    "reflect-metadata": "^0.1.13 || ^0.2.0",
+    "typeorm": "^0.3.20"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@nestjs/common": "^11.2.7",
+    "@nestjs/core": "^11.2.7",
+    "@nestjs/platform-express": "^11.2.7",
+    "@nestjs/testing": "^11.2.7",
+    "@nestjs/typeorm": "^11.0.3",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^22.20.5",
+    "@types/supertest": "^7.2.1",
+    "better-sqlite3": "^12.11.1",
+    "eslint": "^9.39.5",
+    "eslint-config-prettier": "^10.1.8",
+    "jest": "^30.5.2",
+    "prettier": "^3.9.9",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "supertest": "^7.3.1",
+    "ts-jest": "^29.4.14",
+    "ts-node": "^10.9.2",
+    "tsconfig-paths": "^4.2.0",
+    "typeorm": "^0.3.31",
+    "typescript": "~5.9",
+    "typescript-eslint": "^8.71.0"
+  }
+}

@@ -7,6 +7,7 @@ import {
   InsertResult,
   ObjectLiteral,
   QueryRunner,
+  RemoveOptions,
   Repository,
   SaveOptions,
   SelectQueryBuilder,
@@ -34,7 +35,7 @@ const TENANT_PARAMETER = 'tenantGuardTenantId';
  * A repository that adds the current tenant to every read, update and delete.
  *
  * It is a wrapper, not a subclass of TypeORM's `Repository`, on purpose: a subclass would
- * silently inherit unscoped methods (`sum`, `increment`, `remove`, ...). Anything not
+ * silently inherit unscoped methods (`sum`, `upsert`, ...). Anything not
  * listed here is simply not available; use `createQueryBuilder()` for those cases.
  *
  * Only repositories created through this library are protected. A plain
@@ -170,6 +171,27 @@ export class TenantRepository<E extends ObjectLiteral> {
   }
 
   /**
+   * Scoped `increment`: adds `value` to a numeric column of every matching row of the
+   * current tenant. Refuses to touch the tenant column.
+   */
+  async increment(
+    criteria: WhereClause<E>,
+    propertyPath: string,
+    value: number | string,
+  ): Promise<UpdateResult> {
+    return this.incrementBy('increment', '+', criteria, propertyPath, value);
+  }
+
+  /** Scoped `decrement`: the counterpart of {@link increment}. */
+  async decrement(
+    criteria: WhereClause<E>,
+    propertyPath: string,
+    value: number | string,
+  ): Promise<UpdateResult> {
+    return this.incrementBy('decrement', '-', criteria, propertyPath, value);
+  }
+
+  /**
    * Scoped query builder. The tenant condition is attached outside of whatever the caller
    * adds, so `.where()`, `.orWhere()` and friends cannot remove or bypass it.
    *
@@ -199,9 +221,8 @@ export class TenantRepository<E extends ObjectLiteral> {
   }
 
   /**
-   * Same as `Repository.save`. The tenant column is stamped and validated on insert by
-   * `TenantSubscriber`. Saving an entity that already has a primary key updates the row by
-   * that key and is not tenant-checked, so load entities through this repository first.
+   * Same as `Repository.save`. `TenantSubscriber` stamps and validates the tenant on insert,
+   * and on update refuses to overwrite a row of another tenant or move a row to one.
    */
   save<T extends DeepPartial<E>>(entities: T[], options?: SaveOptions): Promise<(T & E)[]>;
   save<T extends DeepPartial<E>>(entity: T, options?: SaveOptions): Promise<T & E>;
@@ -209,10 +230,51 @@ export class TenantRepository<E extends ObjectLiteral> {
     entityOrEntities: T | T[],
     options?: SaveOptions,
   ): Promise<(T & E)[] | (T & E)> {
+    // Fail before any SQL, even when the subscriber is not registered.
+    this.condition('save');
     // Both branches look identical, but TypeORM's overloads only accept a narrowed argument.
     return Array.isArray(entityOrEntities)
       ? this.repository.save(entityOrEntities, options)
       : this.repository.save(entityOrEntities, options);
+  }
+
+  /**
+   * Same as `Repository.remove`. `TenantSubscriber` loads each row by primary key and
+   * refuses to delete a row of another tenant, so a crafted entity cannot reach across.
+   */
+  remove(entities: E[], options?: RemoveOptions): Promise<E[]>;
+  remove(entity: E, options?: RemoveOptions): Promise<E>;
+  async remove(entityOrEntities: E | E[], options?: RemoveOptions): Promise<E | E[]> {
+    this.condition('remove');
+    return Array.isArray(entityOrEntities)
+      ? this.repository.remove(entityOrEntities, options)
+      : this.repository.remove(entityOrEntities, options);
+  }
+
+  /** Same as `Repository.softRemove`, guarded by `TenantSubscriber` like {@link remove}. */
+  softRemove<T extends DeepPartial<E>>(entities: T[], options?: SaveOptions): Promise<(T & E)[]>;
+  softRemove<T extends DeepPartial<E>>(entity: T, options?: SaveOptions): Promise<T & E>;
+  async softRemove<T extends DeepPartial<E>>(
+    entityOrEntities: T | T[],
+    options?: SaveOptions,
+  ): Promise<(T & E)[] | (T & E)> {
+    this.condition('softRemove');
+    return Array.isArray(entityOrEntities)
+      ? this.repository.softRemove(entityOrEntities, options)
+      : this.repository.softRemove(entityOrEntities, options);
+  }
+
+  /** Same as `Repository.recover` (undoes `softRemove`), guarded by `TenantSubscriber`. */
+  recover<T extends DeepPartial<E>>(entities: T[], options?: SaveOptions): Promise<(T & E)[]>;
+  recover<T extends DeepPartial<E>>(entity: T, options?: SaveOptions): Promise<T & E>;
+  async recover<T extends DeepPartial<E>>(
+    entityOrEntities: T | T[],
+    options?: SaveOptions,
+  ): Promise<(T & E)[] | (T & E)> {
+    this.condition('recover');
+    return Array.isArray(entityOrEntities)
+      ? this.repository.recover(entityOrEntities, options)
+      : this.repository.recover(entityOrEntities, options);
   }
 
   /** Same as `Repository.insert`. The tenant column is stamped and validated by `TenantSubscriber`. */
@@ -220,6 +282,41 @@ export class TenantRepository<E extends ObjectLiteral> {
     entity: QueryDeepPartialEntity<E> | QueryDeepPartialEntity<E>[],
   ): Promise<InsertResult> {
     return this.repository.insert(entity);
+  }
+
+  private async incrementBy(
+    operation: string,
+    operator: '+' | '-',
+    criteria: WhereClause<E>,
+    propertyPath: string,
+    value: number | string,
+  ): Promise<UpdateResult> {
+    const metadata = this.repository.metadata;
+    const column = metadata.findColumnWithPropertyPath(propertyPath);
+    if (!column) {
+      throw new TypeError(`${operation}: ${metadata.name} has no column "${propertyPath}".`);
+    }
+    if (
+      typeof value === 'string'
+        ? value.trim() === '' || !Number.isFinite(Number(value))
+        : !Number.isFinite(value)
+    ) {
+      throw new TypeError(`${operation}: value must be a finite number.`);
+    }
+    if (propertyPath === this.config.column) {
+      throw new TypeError(`${operation}: the tenant column "${propertyPath}" cannot be changed.`);
+    }
+    const where = this.scopeWhere(operation, criteria);
+    const escaped = this.repository.manager.connection.driver.escape(column.databaseName);
+    const amount = Number(value);
+    return this.repository.manager
+      .createQueryBuilder()
+      .update(this.repository.target)
+      .set({
+        [propertyPath]: () => `${escaped} ${operator} ${amount}`,
+      } as QueryDeepPartialEntity<E>)
+      .where(where)
+      .execute();
   }
 
   /** Returns the tenant condition for the current context, or `undefined` while bypassed. */

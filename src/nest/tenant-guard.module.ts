@@ -79,8 +79,9 @@ export class TenantGuardModule implements NestModule {
         },
         {
           provide: TenantSubscriber,
-          useFactory: registerTenantSubscriber,
-          inject: [DataSource],
+          useFactory: (dataSource: DataSource, options: TenantGuardOptions) =>
+            registerTenantSubscriber(dataSource, { verifyLoadedRows: options.verifyLoadedRows }),
+          inject: [DataSource, TENANT_GUARD_OPTIONS],
         },
         TenantContextMiddleware,
       ],

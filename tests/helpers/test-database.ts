@@ -5,14 +5,14 @@ import {
   TenantRepository,
   TenantSubscriber,
 } from '../../src';
-import { Country, Invoice, Note } from './entities';
+import { Country, Invoice, Note, Payment } from './entities';
 
 /** Fresh in-memory SQLite database with the insert subscriber registered. */
 export async function createTestDataSource(): Promise<DataSource> {
   const dataSource = new DataSource({
     type: 'better-sqlite3',
     database: ':memory:',
-    entities: [Invoice, Note, Country],
+    entities: [Invoice, Note, Country, Payment],
     subscribers: [TenantSubscriber],
     synchronize: true,
   });

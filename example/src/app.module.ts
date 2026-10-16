@@ -16,7 +16,8 @@ import { Plan } from './plan.entity';
     // Reads the tenant from the `x-tenant-id` header. In production, only accept that
     // header from a trusted gateway, or resolve the tenant from a verified JWT instead
     // (see jwt-tenant.resolver.ts).
-    TenantGuardModule.forRoot({ header: 'x-tenant-id' }),
+    // verifyLoadedRows: also fail loudly if a join or relation ever returns another tenant's row.
+    TenantGuardModule.forRoot({ header: 'x-tenant-id', verifyLoadedRows: true }),
     TenantGuardModule.forFeature([Invoice]),
     TypeOrmModule.forFeature([Plan]),
   ],

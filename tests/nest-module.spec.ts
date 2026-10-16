@@ -2,15 +2,18 @@ import { Controller, Get, INestApplication, Injectable, Module, Post, Body } fro
 import { Test } from '@nestjs/testing';
 import { InjectRepository, TypeOrmModule } from '@nestjs/typeorm';
 import request from 'supertest';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import {
   InjectTenantRepository,
+  runWithTenant,
   TenantGuardModule,
+  TenantMismatchError,
+  TenantSubscriber,
   TenantRepository,
   TenantRequest,
   TenantResolver,
 } from '../src';
-import { Country, Invoice } from './helpers/entities';
+import { Country, Invoice, Payment } from './helpers/entities';
 
 @Injectable()
 class InvoiceService {
@@ -61,7 +64,7 @@ class FeatureModule {}
 const databaseModule = TypeOrmModule.forRoot({
   type: 'better-sqlite3',
   database: ':memory:',
-  entities: [Invoice, Country],
+  entities: [Invoice, Country, Payment],
   synchronize: true,
 });
 
@@ -129,6 +132,26 @@ describe('TenantGuardModule', () => {
     it('still serves global entities without a tenant', async () => {
       const response = await request(app.getHttpServer()).get('/countries');
       expect(response.status).toBe(200);
+    });
+  });
+
+  describe('verifyLoadedRows', () => {
+    it('is off by default and turned on by forRoot', async () => {
+      const readAllAsAcme = async () => {
+        const dataSource = app.get(DataSource);
+        await runWithTenant('globex', () =>
+          dataSource.getRepository(Invoice).save({ title: 'G1' }),
+        );
+        return runWithTenant('acme', () => dataSource.getRepository(Invoice).find());
+      };
+
+      app = await createApp(TenantGuardModule.forRoot());
+      expect(await readAllAsAcme()).toHaveLength(1);
+      await app.close();
+
+      app = await createApp(TenantGuardModule.forRoot({ verifyLoadedRows: true }));
+      expect(app.get(TenantSubscriber)).toBeInstanceOf(TenantSubscriber);
+      await expect(readAllAsAcme()).rejects.toBeInstanceOf(TenantMismatchError);
     });
   });
 

@@ -206,6 +206,10 @@ describe('TenantRepository', () => {
       // The tenant condition is written for a SELECT. UPDATE/DELETE builders resolve column
       // names differently, so TypeORM rejects the statement. That is the safe outcome; the
       // README tells users to call repository.update()/delete() instead.
+      // Matched by message, not with toThrow(): better-sqlite3 is a native module loaded once
+      // per worker, so its SqliteError can come from another test file's realm and then fail
+      // `instanceof Error`, which toThrow() relies on.
+      const sqlError = { message: expect.stringContaining('tenantId') };
       await expect(
         asAcme(() =>
           invoices
@@ -215,10 +219,10 @@ describe('TenantRepository', () => {
             .where('1 = 1')
             .execute(),
         ),
-      ).rejects.toThrow();
+      ).rejects.toMatchObject(sqlError);
       await expect(
         asAcme(() => invoices.createQueryBuilder('i').delete().where('1 = 1').execute()),
-      ).rejects.toThrow();
+      ).rejects.toMatchObject(sqlError);
       expect(await asGlobex(() => invoices.count())).toBe(2);
       expect(await asAcme(() => invoices.count())).toBe(2);
     });

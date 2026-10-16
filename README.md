@@ -89,6 +89,16 @@ A resolver implements `TenantResolver`: return the tenant id, or `undefined` if 
 
 **The default header resolver trusts the client.** Use it only when a gateway or reverse proxy sets the header and strips any client-supplied value. Otherwise derive the tenant from a verified credential. [`example/src/jwt-tenant.resolver.ts`](example/src/jwt-tenant.resolver.ts) reads it from a verified JWT. It verifies the token itself because the resolver runs in middleware, before guards, so `request.user` is not populated yet.
 
+### Verifying loaded rows
+
+```ts
+TenantGuardModule.forRoot({ header: 'x-tenant-id', verifyLoadedRows: true });
+// or, without the module:
+registerTenantSubscriber(dataSource, { verifyLoadedRows: true });
+```
+
+With `verifyLoadedRows`, every row of a tenant-scoped entity that TypeORM loads while a tenant is set is checked against that tenant. A row of another tenant throws `TenantMismatchError` (operation `"load"`) instead of being returned. It is the safety net for the paths the repository cannot scope: `relations`, query builder joins, sub-queries and plain repositories. Bypassed and tenant-less reads are not checked, and neither are partial selects that leave out the tenant column. Off by default, because it costs one property check per loaded row and turns existing silent leaks into errors; turn it on in development and CI first.
+
 ### Without the Nest module
 
 ```ts
@@ -113,13 +123,15 @@ await dataSource.transaction(async (manager) => {
 
 ## What is scoped
 
-`TenantRepository` applies the current tenant to `find`, `findBy`, `findAndCount`, `findAndCountBy`, `findOne`, `findOneBy`, `findOneOrFail`, `findOneByOrFail`, `count`, `countBy`, `exists`, `existsBy`, `update`, `delete`, `softDelete`, `restore` and `createQueryBuilder`. It also offers `create`, `save` and `insert`, which are stamped by the subscriber.
+`TenantRepository` applies the current tenant to `find`, `findBy`, `findAndCount`, `findAndCountBy`, `findOne`, `findOneBy`, `findOneOrFail`, `findOneByOrFail`, `count`, `countBy`, `exists`, `existsBy`, `update`, `delete`, `softDelete`, `restore`, `increment`, `decrement` and `createQueryBuilder`. It also offers `create`, `save`, `insert`, `remove`, `softRemove` and `recover`, which are guarded by the subscriber.
 
 - Array (`OR`) where clauses get the tenant on **every** branch. An empty array becomes "this tenant", not "everything".
 - A where that names a different tenant (`{ tenantId: 'other' }`) throws `TenantMismatchError` instead of being rewritten. The same goes for an `update` that tries to move a row to another tenant.
 - `update`, `delete`, `softDelete` and `restore` take a where object (or array), not a bare id: write `{ id }`.
-- Methods that are not listed (`sum`, `increment`, `remove`, ...) are not exposed at all, so there is no unscoped back door by inheritance. Use `createQueryBuilder()` for them.
+- Methods that are not listed (`sum`, `upsert`, ...) are not exposed at all, so there is no unscoped back door by inheritance. Use `createQueryBuilder()` for them.
 - Inserts are stamped and validated by `TenantSubscriber` on **any** insert path of the DataSource, including plain repositories.
+- Writes by primary key are checked against the **stored** row on any path of the DataSource: `save({ id, ... })`, `remove`, `softRemove` and `recover` throw `TenantMismatchError` when the row belongs to another tenant, so an id taken from a URL cannot reach another tenant's row. `save` also refuses to move a row to another tenant or clear its tenant.
+- Every write on a tenant-scoped entity needs a tenant or a bypass, including query-builder `update`/`delete` through a plain repository. Outside both it throws `MissingTenantContextError` instead of touching every tenant.
 
 ## The bypass
 
@@ -153,6 +165,14 @@ but the operation names "globex". Use withoutTenantScope(reason, fn) if crossing
 ```
 
 ```ts
+@Catch(TenantMismatchError)
+export class TenantMismatchFilter implements ExceptionFilter {
+  catch(_error: TenantMismatchError, host: ArgumentsHost) {
+    // 404, not 403: do not confirm that the id exists for another tenant.
+    host.switchToHttp().getResponse().status(404).json({ message: 'Not found' });
+  }
+}
+
 @Catch(MissingTenantContextError)
 export class MissingTenantFilter implements ExceptionFilter {
   catch(_error: MissingTenantContextError, host: ArgumentsHost) {
@@ -166,10 +186,11 @@ export class MissingTenantFilter implements ExceptionFilter {
 This is application-level protection. It closes the "someone forgot the condition" hole for the paths it covers; it is not a database security boundary. Read this list before relying on it.
 
 - **Raw SQL is not protected.** `dataSource.query`, `manager.query` and `queryRunner.query` are neither filtered nor stamped, even inside a tenant context. If you write raw SQL on a tenant-scoped table, add the tenant condition yourself. (`tests/raw-queries.spec.ts` documents this.)
-- **Only this library's repositories are scoped.** A plain `@InjectRepository(Invoice)`, `dataSource.getRepository(Invoice)` or `manager.find(Invoice)` is not. Inserts are still stamped, reads and updates are not.
-- **Joins and sub-queries are not scoped.** `relations` in find options and `leftJoin`/`innerJoin` or sub-queries in a query builder read the joined table without a tenant filter. Rows reached through a foreign key from a scoped row normally belong to the same tenant, but nothing here enforces that.
+- **Only this library's repositories are scoped.** A plain `@InjectRepository(Invoice)`, `dataSource.getRepository(Invoice)` or `manager.find(Invoice)` does not filter. Inserts are still stamped, writes by primary key are still checked, but reads and `update`/`delete` by criteria inside a tenant context are not filtered. `verifyLoadedRows` turns such reads of other tenants into errors.
+- **Joins and sub-queries are not filtered.** `relations` in find options and `leftJoin`/`innerJoin` or sub-queries in a query builder read the joined table without a tenant condition. Rows reached through a foreign key from a scoped row normally belong to the same tenant; with `verifyLoadedRows` a row that does not is an error instead of a leak.
 - **Query builder transitions.** `createQueryBuilder()` returns a scoped `SELECT`. Calling `.update()`, `.delete()`, `.softDelete()` or `.restore()` on it fails with a SQL error; use the repository methods of the same name.
-- **Primary-key writes.** `save()` of an entity that already has an id updates by that id and is not tenant-checked. `remove`, `softRemove` and `recover` are not offered. Load entities through the scoped repository first.
+- **Existence of ids.** A write by primary key to another tenant's row fails with `TenantMismatchError` rather than "not found", so the caller learns that the id exists. Map the error to a 404 in an exception filter if that matters (see Errors).
+- **Tenant column must be selectable.** The checks read the tenant column from loaded rows. A tenant column with `select: false` cannot be checked.
 - **Migrations, seeds and schema sync** run outside any request, so they have no tenant. Raw migration SQL is unaffected. Seed scripts that use the repositories need `runWithTenant` or `withoutTenantScope`.
 - **Non-HTTP entry points** (queues, cron, sockets, microservices) get no middleware. Wrap them in `runWithTenant`.
 - **Lost async context.** If code that clearly runs inside a request throws `MissingTenantContextError`, a library in between probably dropped the `AsyncLocalStorage` context (typically callback- or event-emitter-based code).
@@ -183,6 +204,8 @@ This is application-level protection. It closes the "someone forgot the conditio
 - **Scoping.** `TenantRepository` wraps a TypeORM repository. For each call it reads the context, merges the tenant into every branch of the where, and delegates. With no tenant and no bypass it throws before any SQL runs.
 - **Query builders.** The tenant condition goes into TypeORM's `extraAppendedAndWhereCondition`, which TypeORM renders as `( your conditions ) AND ( tenant )`. A later `.where()` cannot wipe it and `OR` terms cannot escape it.
 - **Insert.** `TenantSubscriber.beforeInsert` stamps the tenant on rows that do not name one and throws if a row names a different one.
+- **Writes by primary key.** Before `save` updates or `remove`/`softRemove`/`recover` deletes a row, TypeORM loads it by id and hands it to the subscriber as `databaseEntity`. `TenantSubscriber` compares that stored tenant with the current one, so the check cannot be fooled by what the caller puts on the entity.
+- **Loaded rows.** With `verifyLoadedRows`, `TenantSubscriber.afterLoad` compares each loaded row, joined relations included, with the current tenant.
 - **Bypass.** `withoutTenantScope` opens a nested context flagged as bypassed; the repository and subscriber check that flag.
 
 ## Compatibility

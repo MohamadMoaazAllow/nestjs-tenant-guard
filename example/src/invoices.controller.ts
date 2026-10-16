@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { InjectTenantRepository, TenantRepository } from 'nestjs-tenant-guard';
@@ -22,6 +22,13 @@ export class InvoicesController {
   @Post('invoices')
   create(@Body() body: { title: string }): Promise<Invoice> {
     return this.invoices.save({ title: body.title });
+  }
+
+  // The classic IDOR shape: the id comes from the URL. If it belongs to another tenant, the
+  // save is refused with TenantMismatchError instead of overwriting that tenant's invoice.
+  @Patch('invoices/:id')
+  rename(@Param('id', ParseIntPipe) id: number, @Body() body: { title: string }): Promise<Invoice> {
+    return this.invoices.save({ id, title: body.title });
   }
 
   @Get('plans')

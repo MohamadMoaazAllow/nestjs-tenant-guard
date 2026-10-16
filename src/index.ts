@@ -23,10 +23,18 @@ export { EntityClass } from './repository/entity-class';
 export { TenantRepository } from './repository/tenant-repository';
 export { createTenantRepository } from './repository/create-tenant-repository';
 
-export { TenantSubscriber, registerTenantSubscriber } from './subscriber/tenant.subscriber';
+export {
+  TenantSubscriber,
+  TenantSubscriberOptions,
+  registerTenantSubscriber,
+} from './subscriber/tenant.subscriber';
 
 export { TenantGuardModule } from './nest/tenant-guard.module';
-export { TenantGuardAsyncOptions, TenantGuardOptions } from './nest/tenant-guard.options';
+export {
+  TenantGuardAsyncOptions,
+  TenantGuardCommonOptions,
+  TenantGuardOptions,
+} from './nest/tenant-guard.options';
 export { TenantContextMiddleware } from './nest/tenant-context.middleware';
 export { InjectTenantRepository } from './nest/inject-tenant-repository';
 export { getTenantRepositoryToken } from './nest/tokens';

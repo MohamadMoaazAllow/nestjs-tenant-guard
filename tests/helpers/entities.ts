@@ -1,4 +1,11 @@
-import { Column, DeleteDateColumn, Entity, PrimaryGeneratedColumn } from 'typeorm';
+import {
+  Column,
+  DeleteDateColumn,
+  Entity,
+  ManyToOne,
+  OneToMany,
+  PrimaryGeneratedColumn,
+} from 'typeorm';
 import { TenantScoped } from '../../src';
 
 @TenantScoped()
@@ -15,6 +22,12 @@ export class Invoice {
 
   @Column({ type: 'varchar', default: 'open' })
   status!: string;
+
+  @Column({ type: 'integer', default: 0 })
+  amount!: number;
+
+  @OneToMany(() => Payment, (payment) => payment.invoice)
+  payments!: Payment[];
 
   @DeleteDateColumn()
   deletedAt!: Date | null;
@@ -42,4 +55,21 @@ export class Country {
 
   @Column({ type: 'varchar' })
   name!: string;
+}
+
+/** Tenant-scoped child of an invoice, to exercise relations and joins. */
+@TenantScoped()
+@Entity()
+export class Payment {
+  @PrimaryGeneratedColumn()
+  id!: number;
+
+  @Column({ type: 'varchar' })
+  tenantId!: string;
+
+  @Column({ type: 'integer' })
+  cents!: number;
+
+  @ManyToOne(() => Invoice, (invoice) => invoice.payments)
+  invoice!: Invoice;
 }

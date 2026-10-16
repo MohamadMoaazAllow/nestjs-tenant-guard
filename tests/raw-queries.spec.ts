@@ -3,6 +3,9 @@ import { runWithTenant } from '../src';
 import { Invoice } from './helpers/entities';
 import { createSeededInvoices } from './helpers/test-database';
 
+// save() by primary key used to be listed here. Since 0.2.0 TenantSubscriber checks the
+// stored row, see tests/existing-row-writes.spec.ts.
+
 /**
  * These tests document the library's limits. They assert the UNPROTECTED behaviour on
  * purpose: if one of them ever fails because the data became protected, the README's
@@ -44,14 +47,5 @@ describe('what is NOT protected', () => {
   it('a plain TypeORM repository is not scoped, only repositories from this library are', async () => {
     const rows = await runWithTenant('acme', () => dataSource.getRepository(Invoice).find());
     expect(rows).toHaveLength(4);
-  });
-
-  it('save() of an entity with an existing primary key is not tenant-checked', async () => {
-    const globexRow = await dataSource.getRepository(Invoice).findOneByOrFail({ title: 'G1' });
-    await runWithTenant('acme', () =>
-      dataSource.getRepository(Invoice).save({ id: globexRow.id, status: 'void' }),
-    );
-    const after = await dataSource.getRepository(Invoice).findOneByOrFail({ id: globexRow.id });
-    expect(after.status).toBe('void');
   });
 });
